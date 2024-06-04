@@ -165,7 +165,7 @@ def transform(**kwargs):
         return df_melt
     logging.info(LOG_FORMAT + 'Collect data from extract')
     ti = kwargs['ti'] # получение объекта task_instance
-    data = ti.xcom_pull(key='extracted_data') # выгрузка данных из task_instance
+    data = ti.xcom_pull(task_ids='extract', key='extracted_data') # выгрузка данных из task_instance
     logging.info(LOG_FORMAT + f'{type(data)}')
     logging.info(LOG_FORMAT + 'Transform projects')
     df_project = transform_projects(data['df_project'], data['country_mapping'], data['non_countries'])
@@ -204,7 +204,7 @@ def load(**kwargs):
     """
     logging.info(LOG_FORMAT + 'Collect data from transform')
     ti = kwargs['ti'] # получение объекта task_instance
-    data = ti.xcom_pull(task_ids='3', key='transformed_data') 
+    data = ti.xcom_pull(task_ids='transform', key='transformed_data') 
     logging.info(LOG_FORMAT + f'{data.columns.tolist()}')
     hook = PostgresHook('destination_db')
     hook.insert_rows(
