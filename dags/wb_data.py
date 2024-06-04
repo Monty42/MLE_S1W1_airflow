@@ -1,22 +1,19 @@
 # dag scripts for World Bank Dataset
 from collections import defaultdict
-import os
 import sys
 import json
 import logging
 from typing import Dict, List
-from datetime import datetime
 
 import pendulum
 import pandas as pd
 import numpy as np
 from pycountry import countries
-from dotenv import load_dotenv
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.providers.sqlite.hooks.sqlite import SqliteHook
 from airflow.decorators import dag, task
 from sqlalchemy import (
-    Table, Column, DateTime, Float, Integer, Index,
+    Table, Column, Float, Integer,
     MetaData, String, UniqueConstraint, inspect)
 
 sys.path.append('../')
