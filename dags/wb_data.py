@@ -20,12 +20,14 @@ from sqlalchemy import (
     MetaData, String, UniqueConstraint, inspect)
 
 sys.path.append('../')
+sys.path.append('../../')
+sys.path.append('../../../')
 LOG_FORMAT  = f'WB_DATA DAG - '
 
 @dag(
     schedule='@once',
     start_date=pendulum.datetime(2023, 1, 1, tz="UTC"),
-    tags=["WorldBanl", "ETL", "Test"]
+    tags=["WorldBank", "ETL", "Test"]
 )
 def prepare_wb_data():
     """
@@ -34,23 +36,28 @@ def prepare_wb_data():
     @task()
     def create_table():
         logging.info(LOG_FORMAT +  'Start the create table part')
-        hook = PostgresHook('destination_db')
+        hook = PostgresHook('destination_db') # Подключение должны быть заранее установлено через UI airflow
         db_engine = hook.get_sqlalchemy_engine()
+        # get_sqlalchemy_engine()
         # Create a metadata object
         metadata = MetaData()
         # Define the table structure
         wb_table = Table('wb_statistic_dag', metadata,
-            Column('index', Integer, primary_key=True, autoincrement=True),
+            Column('id', Integer, primary_key=True, autoincrement=True),
             Column('project_id', String),
             Column('countryname_off', String),
             Column('countryname', String),
-            Column('country_code', String),
-            Column('year', DateTime),
+            Column('countrycode', String),
+            Column('sector1', String),
+            Column('year', String),
+            Column('year_close', String),
             Column('totalamt', String),
             Column('vvp', Float),
             Column('population', Float),
             Column('target', Integer),
+            UniqueConstraint('project_id', name='unique_project_constraint')
         )
+        
         if not inspect(db_engine).has_table(wb_table.name):
             metadata.create_all(db_engine)
 
@@ -60,7 +67,7 @@ def prepare_wb_data():
         # Hooks
         logging.info(LOG_FORMAT + 'Connect to DataBases')
         hook_psql = PostgresHook('source_db') # Подключение должны быть заранее установлено через UI airflow
-        hook_sqllite = SqliteHook('./tmp/population.db') # Подключение устанавливается в локальную директорию
+        hook_sqllite = SqliteHook('population_db') # Подключение устанавливается в локальную директорию ./tmp Dockecer образа
         # Connections
         logging.info(LOG_FORMAT + 'Connect to DataBases')
         conn_psql = hook_psql.get_conn()
@@ -70,7 +77,7 @@ def prepare_wb_data():
         
         # Extract data from different datasources
         logging.info(LOG_FORMAT + 'Extract data')
-        with open('./tmp/population_data_1960_1980.json', 'r') as f:
+        with open('/opt/airflow/tmp/population_data_1960_1980.json', 'r') as f:
             df_population_first = pd.read_json(f)
         
         df_population_second  = pd.read_sql(
@@ -96,9 +103,9 @@ def prepare_wb_data():
         logging.info('Closing connections')
         conn_psql.close()
         conn_sqllite.close()
-        with open('./tmp/country_not_found_mapping.json', 'r') as f:
+        with open('/opt/airflow/tmp/country_not_found_mapping.json', 'r') as f:
             country_not_found_mapping = json.load(f)
-        with open('./tmp/non_countries.json', 'r') as f:
+        with open('/opt/airflow/tmp/non_countries.json', 'r') as f:
             non_countries = json.load(f)
 
         data = {
@@ -164,6 +171,7 @@ def prepare_wb_data():
                        .fillna(method='bfill')
             )
             df_melt = df_melt[~df_melt['Country Name'].isin(non_countries)]
+            df_melt[f'{target_column}'] = df_melt[f'{target_column}'].astype(float)
             return df_melt
         logging.info(LOG_FORMAT + 'Transform projects')
         df_project = transform_projects(data['df_project'], data['country_mapping'], data['non_countries'])
@@ -191,18 +199,20 @@ def prepare_wb_data():
             inplace=True,
         )
         df_project_meta.reset_index(drop=True, inplace=True)
+        df_project_meta.rename(columns={'id': 'project_id'}, inplace=True)
         logging.info(LOG_FORMAT + f'Size of final data {df_project_meta.shape}')
         logging.info(LOG_FORMAT + 'End of transform part')
         return df_project_meta
 
     @task()
     def load(data: pd.DataFrame):
+        logging.info(LOG_FORMAT + f'{data.columns.tolist()}')
         hook = PostgresHook('destination_db')
         hook.insert_rows(
             table="wb_statistic_dag",
             replace=True,
             target_fields=data.columns.tolist(),
-            replace_index=['index'],
+            replace_index=['id'],
             rows=data.values.tolist()
         )
 
