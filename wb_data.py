@@ -65,6 +65,7 @@ def prepare_wb_data() -> None:
         engine_psql = _create_engine('SOURCE')
         engine_sqlite = create_engine('sqlite:///data/preprocess_data/population_data.db')
         # second type connection for sqlite
+        # import sqlite3
         # engine_sqllite = sqlite3.connect('data/clear_data/population_data.db')
 
         # Selection Template
