@@ -19,3 +19,4 @@ with DAG(
 
     [step1, step2] >> step3 >> step4
     # эквивалентно chain([step1, step2], step3, step4)
+

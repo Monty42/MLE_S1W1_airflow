@@ -27,6 +27,7 @@ LOG_FORMAT  = f'WB_DATA DAG - '
     tags=["WorldBank", "ETL", "Test"]
 )
 def prepare_wb_data():
+
     """
     
     """
@@ -212,6 +213,7 @@ def prepare_wb_data():
             replace_index=['id'],
             rows=data.values.tolist()
         )
+
 
     create_table()
     data = extract()
