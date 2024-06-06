@@ -40,7 +40,7 @@ def prepare_wb_data() -> None:
         """Extract data from different sources.
 
         Returns:
-            Dict: dictionary with different data in format%
+            Dict: dictionary with different data in format:
                 "key_data": dataframe/data/else
         """
         pass
