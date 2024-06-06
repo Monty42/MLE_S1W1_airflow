@@ -1,88 +1,88 @@
-# dag scripts for World Bank Dataset
+# ETL-pipeline for World Bank Dataset
 from collections import defaultdict
+import os
 import sys
 import json
 import logging
 from typing import Dict, List
+from datetime import datetime
 
-import pendulum
-import pandas as pd
+import sqlite3
 import numpy as np
+import pandas as pd
 from pycountry import countries
-from airflow.providers.postgres.hooks.postgres import PostgresHook
-from airflow.providers.sqlite.hooks.sqlite import SqliteHook
-from airflow.decorators import dag, task
+from dotenv import load_dotenv
 from sqlalchemy import (
-    Table, Column, Float, Integer,
-    MetaData, String, UniqueConstraint, inspect)
+    Table, Column, DateTime, Float, Integer,
+    MetaData, String, UniqueConstraint, create_engine, inspect)
 
 sys.path.append('../')
-sys.path.append('../../')
-sys.path.append('../../../')
-LOG_FORMAT  = f'WB_DATA DAG - '
+logging.basicConfig(level=logging.INFO, filename="py_log.log", filemode="w",
+                    format="%(asctime)s %(levelname)s %(message)s")
+LOG_FORMAT  = f'WB_DATA ETL - '
 
-@dag(
-    schedule='@once',
-    start_date=pendulum.datetime(2023, 1, 1, tz="UTC"),
-    tags=["WorldBank", "ETL", "Test"]
-)
-def prepare_wb_data():
+def prepare_wb_data() -> None:
+    """ETL-pipeline for WorldBank Dataset"""
 
-    """
-    
-    """
-    @task()
+    def _create_engine(source: str):
+        load_dotenv()
+        host = os.environ.get(f'DB_{source}_HOST')
+        port = os.environ.get(f'DB_{source}_PORT')
+        username = os.environ.get(f'DB_{source}_USER')
+        password = os.environ.get(f'DB_{source}_PASSWORD')
+        db = os.environ.get(f'DB_{source}_NAME')
+        
+        return create_engine(
+            f'postgresql://{username}:{password}@{host}:{port}/{db}')
+
+
     def create_table():
         logging.info(LOG_FORMAT +  'Start the create table part')
-        hook = PostgresHook('destination_db') # Подключение должны быть заранее установлено через UI airflow
-        db_engine = hook.get_sqlalchemy_engine()
-        # get_sqlalchemy_engine()
+        db_engine = _create_engine('DESTINATION')
         # Create a metadata object
         metadata = MetaData()
         # Define the table structure
-        wb_table = Table('wb_statistic_dag', metadata,
-            Column('id', Integer, primary_key=True, autoincrement=True),
+        wb_table = Table('wb_statistic_etl', metadata,
+            Column('index', Integer, primary_key=True, autoincrement=True),
             Column('project_id', String),
             Column('countryname_off', String),
             Column('countryname', String),
-            Column('countrycode', String),
-            Column('sector1', String),
-            Column('year', String),
-            Column('year_close', String),
-            Column('totalamt', String),
+            Column('country_code', String),
+            Column('year', DateTime),
+            Column('totalamt', Integer),
             Column('vvp', Float),
             Column('population', Float),
             Column('target', Integer),
-            UniqueConstraint('project_id', name='unique_project_constraint')
+            UniqueConstraint('index', name='unique_index_constraint')
         )
-        
         if not inspect(db_engine).has_table(wb_table.name):
             metadata.create_all(db_engine)
 
-    @task()
-    def extract():
+    def extract() -> Dict:
         logging.info(LOG_FORMAT + 'Start the extract part')
-        # Hooks
+        # Engines
         logging.info(LOG_FORMAT + 'Connect to DataBases')
-        hook_psql = PostgresHook('source_db') # Подключение должны быть заранее установлено через UI airflow
-        hook_sqllite = SqliteHook('population_db') # Подключение устанавливается в локальную директорию ./tmp Dockecer образа
-        # Connections
-        logging.info(LOG_FORMAT + 'Connect to DataBases')
-        conn_psql = hook_psql.get_conn()
-        conn_sqllite = hook_sqllite.get_conn()
+        engine_psql = _create_engine('SOURCE')
+        engine_sqlite = create_engine('sqlite:///data/preprocess_data/population_data.db')
+        # second type connection for sqlite
+        # import sqlite3
+        # engine_sqllite = sqlite3.connect('data/clear_data/population_data.db')
+
         # Selection Template
         sql_template = "select * from {}"
         
         # Extract data from different datasources
         logging.info(LOG_FORMAT + 'Extract data')
-        with open('/opt/airflow/tmp/population_data_1960_1980.json', 'r') as f:
+
+        logging.info(LOG_FORMAT + 'Extract population data')
+        with open('data/preprocess_data/population_data_1960_1980.json', 'r') as f:
             df_population_first = pd.read_json(f)
         
-        df_population_second  = pd.read_sql(
-            sql_template.format('population_data_1981_2000'), conn_sqllite)
+        df_population_second  = pd.read_sql('population_data', engine_sqlite)
         df_population_third = pd.read_sql(
-            sql_template.format('s1w1_population_data_2001_2017'), conn_psql)
+            sql_template.format('s1w1_population_data_2001_2017'), engine_psql)
         
+        logging.info(LOG_FORMAT + 'Merge population data')
         df_population = df_population_first.merge(
             df_population_second.merge(
                 df_population_third,
@@ -92,18 +92,14 @@ def prepare_wb_data():
             on=['Country Name', 'Country Code', 'Indicator Name', 'Indicator Code'],
             how='left'
         )
-
         logging.info(LOG_FORMAT + 'Extract other data')
-        df_rural = pd.read_sql(sql_template.format('s1w1_rural_population_percent'), conn_psql)
-        df_electricity = pd.read_sql(sql_template.format('s1w1_electricity_access_percent'), conn_psql)
-        df_project = pd.read_sql(sql_template.format('s1w1_projects_data'), conn_psql)
-        df_vvp = pd.read_sql(sql_template.format('s1w1_vvp_data'), conn_psql)
-        logging.info('Closing connections')
-        conn_psql.close()
-        conn_sqllite.close()
-        with open('/opt/airflow/tmp/country_not_found_mapping.json', 'r') as f:
+        df_rural = pd.read_sql(sql_template.format('s1w1_rural_population_percent'), engine_psql)
+        df_electricity = pd.read_sql(sql_template.format('s1w1_electricity_access_percent'), engine_psql)
+        df_project = pd.read_sql(sql_template.format('s1w1_projects_data'), engine_psql)
+        df_vvp = pd.read_sql(sql_template.format('s1w1_vvp_data'), engine_psql)
+        with open('data/preprocess_data/country_not_found_mapping.json', 'r') as f:
             country_not_found_mapping = json.load(f)
-        with open('/opt/airflow/tmp/non_countries.json', 'r') as f:
+        with open('data/preprocess_data/non_countries.json', 'r') as f:
             non_countries = json.load(f)
 
         data = {
@@ -119,7 +115,6 @@ def prepare_wb_data():
         logging.info(LOG_FORMAT + 'End of extract data')
         return data
 
-    @task()
     def transform(data: Dict) -> pd.DataFrame:
         logging.info(LOG_FORMAT + 'Start the transform part')
         def transform_projects(
@@ -169,7 +164,6 @@ def prepare_wb_data():
                        .fillna(method='bfill')
             )
             df_melt = df_melt[~df_melt['Country Name'].isin(non_countries)]
-            df_melt[f'{target_column}'] = df_melt[f'{target_column}'].astype(float)
             return df_melt
         logging.info(LOG_FORMAT + 'Transform projects')
         df_project = transform_projects(data['df_project'], data['country_mapping'], data['non_countries'])
@@ -197,30 +191,29 @@ def prepare_wb_data():
             inplace=True,
         )
         df_project_meta.reset_index(drop=True, inplace=True)
-        df_project_meta.rename(columns={'id': 'project_id'}, inplace=True)
         logging.info(LOG_FORMAT + f'Size of final data {df_project_meta.shape}')
         logging.info(LOG_FORMAT + 'End of transform part')
         return df_project_meta
 
-    @task()
     def load(data: pd.DataFrame):
-        logging.info(LOG_FORMAT + f'{data.columns.tolist()}')
-        hook = PostgresHook('destination_db')
-        hook.insert_rows(
-            table="wb_statistic_dag",
-            replace=True,
-            target_fields=data.columns.tolist(),
-            replace_index=['id'],
-            rows=data.values.tolist()
-        )
-
-
-    create_table()
+        logging.info(LOG_FORMAT + 'Start the load part')
+        try:
+            db_engine = _create_engine('DESTINATION')
+            data.to_sql(
+                'wb_statistic_etl',
+                con=db_engine,
+                index=True,
+                if_exists='append'
+            )
+            logging.info(LOG_FORMAT + 'Loading status: OK')
+        except:
+            logging.info(LOG_FORMAT + 'Loading status: FAIL')
+        
+    # create_table()
     data = extract()
     transformed_data = transform(data)
     load(transformed_data)
 
-prepare_wb_data()
 
 if __name__ == '__main__':
     prepare_wb_data()

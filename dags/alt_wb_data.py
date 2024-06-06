@@ -6,6 +6,17 @@ from airflow.models.baseoperator import chain
 from steps.wb_data import create_table, extract, transform, load
 LOG_FORMAT  = f'WB_DATA DAG - '
 
-# Реализуйте DAG с помощью контекстного менеджера `with`
-with DAG() as dag:
-    pass
+with DAG(
+    dag_id='prepare_wb_data_alt',
+    schedule='@once',
+    start_date=pendulum.datetime(2023, 1, 1, tz="UTC"),
+    tags=["WorldBank", "ETL", "Test"]) as dag:
+
+    step1 = PythonOperator(task_id='create_table', python_callable=create_table)
+    step2 = PythonOperator(task_id='extract', python_callable=extract)
+    step3 = PythonOperator(task_id='transform', python_callable=transform)
+    step4 = PythonOperator(task_id='load', python_callable=load)
+
+    [step1, step2] >> step3 >> step4
+    # эквивалентно chain([step1, step2], step3, step4)
+

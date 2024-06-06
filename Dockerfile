@@ -4,6 +4,8 @@ COPY requirements.txt ./tmp/requirements.txt
 COPY data/preprocess_data/ ./tmp/
 
 
+
 # установка необходимых библиотек
 RUN pip install -U pip
 RUN pip install -r ./tmp/requirements.txt
+
