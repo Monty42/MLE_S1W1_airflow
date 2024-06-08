@@ -7,8 +7,8 @@ import logging
 from typing import Dict, List
 
 import numpy as np
-import pandas as pd
-from pycountry import countries
+# import pandas as pd
+# from pycountry import countries
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 
