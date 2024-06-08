@@ -9,13 +9,17 @@ from typing import Dict, List
 import pendulum
 import pandas as pd
 import numpy as np
+from dotenv import load_dotenv
 from pycountry import countries
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.providers.sqlite.hooks.sqlite import SqliteHook
+from airflow.providers.telegram.operators.telegram import TelegramOperator
 from airflow.decorators import dag, task
 from sqlalchemy import (
     Table, Column, Float, Integer,
     MetaData, String, UniqueConstraint, inspect)
+
+load_dotenv()
 
 sys.path.append('../')
 sys.path.append('../../')
@@ -25,15 +29,19 @@ LOG_FORMAT  = f'WB_DATA DAG - '
 @dag(
     schedule='@once',
     start_date=pendulum.datetime(2023, 1, 1, tz="UTC"),
-    tags=["WorldBank", "ETL", "Test"]
+    tags=["WorldBank", "ETL", "Test"],
+    default_args={
+        'retries': 3, 
+        'retry_delay': pendulum.duration(minutes=1) 
+    },
+     catchup=False
 )
 def prepare_wb_data():
-    @task()
+    @task(retries=3, retry_delay=pendulum.duration(minutes=1))
     def create_table():
-        logging.info(LOG_FORMAT +  'Start the create table part')
-        hook = PostgresHook('destination_db') # Подключение должны быть заранее установлено через UI airflow
+        logging.info(LOG_FORMAT + 'Start the create table part')
+        hook = PostgresHook('destination_db')  # Подключение должны быть заранее установлено через UI airflow
         db_engine = hook.get_sqlalchemy_engine()
-        # get_sqlalchemy_engine()
         # Create a metadata object
         metadata = MetaData()
         # Define the table structure
@@ -46,17 +54,19 @@ def prepare_wb_data():
             Column('sector1', String),
             Column('year', String),
             Column('year_close', String),
-            Column('totalamt', String),
+            Column('totalamt', Float),
             Column('vvp', Float),
             Column('population', Float),
+            Column('s1w1_electricity_access_percent', Float),
+            Column('s1w1_rural_population_percent', Float),
             Column('target', Integer),
             UniqueConstraint('project_id', name='unique_project_constraint')
         )
-        
+
         if not inspect(db_engine).has_table(wb_table.name):
             metadata.create_all(db_engine)
 
-    @task()
+    @task(retries=3, retry_delay=pendulum.duration(minutes=1))
     def extract():
         logging.info(LOG_FORMAT + 'Start the extract part')
         # Hooks
@@ -136,9 +146,10 @@ def prepare_wb_data():
         # отдаем данные
         return data
 
-    @task()
+    @task(retries=3, retry_delay=pendulum.duration(minutes=1))
     def transform(data: Dict) -> pd.DataFrame:
         logging.info(LOG_FORMAT + 'Start the transform part')
+        
         def transform_projects(
                 df: pd.DataFrame, 
                 country_mapping: Dict,
@@ -176,6 +187,8 @@ def prepare_wb_data():
             df['sector1'] = df['sector1'].replace('^(\(Historic\))', '', regex=True)
             # оставляем в датафрейме только страны
             df = df[~df['countryname'].isin(non_countries)]
+
+            df['totalamt'] = df['totalamt'].replace('[\$,]', '', regex=True).astype(float)
             # выбираем только нужные столбцы
             df = df[['id', 'countryname', 'sector1', 'countrycode', 'totalamt', 'year', 'year_close', 'target']]
             return df
@@ -202,6 +215,7 @@ def prepare_wb_data():
             # переводим столбец индикатора к числовому типу
             df_melt[f'{target_column}'] = df_melt[f'{target_column}'].astype(float)
             return df_melt
+        
         logging.info(LOG_FORMAT + 'Collect data from extract')
         logging.info(LOG_FORMAT + f'{type(data)}')
         logging.info(LOG_FORMAT + 'Transform projects')
@@ -211,12 +225,21 @@ def prepare_wb_data():
         # собираем общий файл с экономическими индикаторами
         df_vvp = transform_other(data['df_vvp'], data['non_countries'], 'vvp')
         df_population  = transform_other(data['df_population'], data['non_countries'], 'population')
+        df_electricity = transform_other(data['df_electricity'], data['non_countries'], 's1w1_electricity_access_percent')
+        df_rural = transform_other(data['df_rural'], data['non_countries'], 's1w1_rural_population_percent')
+        
         df_indicator = df_vvp.merge(
             df_population,
             on=('Country Name', 'Country Code', 'year'),
+        ).merge(
+            df_electricity,
+            on=('Country Name', 'Country Code', 'year'),
+        ).merge(
+            df_rural,
+            on=('Country Name', 'Country Code', 'year'),
         )
         # оставляем только нужные столбца
-        df_indicator.columns = ['countryname', 'countrycode', 'year', 'vvp', 'population']
+        df_indicator.columns = ['countryname', 'countrycode', 'year', 'vvp', 'population', 's1w1_electricity_access_percent', 's1w1_rural_population_percent']
         logging.info(LOG_FORMAT + f'Number of clear data -- {df_indicator.countrycode.isna().sum()}')
         logging.info(LOG_FORMAT + f'Number of clear data -- {df_project.countrycode.isna().sum()}')
         logging.info(LOG_FORMAT + 'Merging data')
@@ -242,7 +265,8 @@ def prepare_wb_data():
         logging.info(LOG_FORMAT + 'End of transform part')
         return df_project_meta
 
-    @task()
+
+    @task(retries=3, retry_delay=pendulum.duration(minutes=1))
     def load(data: pd.DataFrame):
         logging.info(LOG_FORMAT + f'{data.columns.tolist()}')
         # загружаем данные в целевую таблицу
@@ -255,14 +279,28 @@ def prepare_wb_data():
             rows=data.values.tolist()
         )
 
-    # создаем таблицу
-    create_table()
-    # экспортируем данные
-    data = extract()
-    # преобразовываем данные
-    transformed_data = transform(data)
-    # загружаем данные в целевую таблицу
-    load(transformed_data)
+    send_success_notification = TelegramOperator(
+        task_id='send_success_notification',
+        telegram_conn_id='dag_notification',
+        chat_id='-4239968294',
+        text='DAG prepare_wb_data completed successfully!',
+    )
+
+    send_failure_notification = TelegramOperator(
+        task_id='send_failure_notification',
+        telegram_conn_id='dag_notification',
+        chat_id='-4239968294',
+        text='DAG prepare_wb_data failed!',
+        trigger_rule='one_failed'
+    )
+
+    create_table_task = create_table()
+    extract_task = extract()
+    transform_task = transform(extract_task)
+    load_task = load(transform_task)
+
+    create_table_task >> extract_task >> transform_task >> load_task >> send_success_notification
+    create_table_task >> extract_task >> transform_task >> load_task >> send_failure_notification
 
 prepare_wb_data()
 
