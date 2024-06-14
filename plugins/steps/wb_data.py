@@ -11,7 +11,7 @@ from pycountry import countries
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.providers.sqlite.hooks.sqlite import SqliteHook
 from sqlalchemy import (
-    Table, Column, Float, Integer,
+    Table, Column, Float, BigInteger, Integer,
     MetaData, String, UniqueConstraint, inspect)
 
 sys.path.append('../')
@@ -36,9 +36,11 @@ def create_table(**kwargs):
         Column('sector1', String),
         Column('year', String),
         Column('year_close', String),
-        Column('totalamt', String),
+        Column('totalamt', BigInteger),
         Column('vvp', Float),
         Column('population', Float),
+        Column('electricity', Float),
+        Column('population_rural', Float),
         Column('target', Integer),
         UniqueConstraint('project_id_alt', name='unique_project_alt_constraint')
     )
@@ -128,14 +130,14 @@ def transform(**kwargs):
             except: 
                 continue
         project_country_abbrev_dict.update(country_mapping)
-        df['countrycode'] = df['countryname'].apply(lambda x: project_country_abbrev_dict[x])
+        df['countrycode'] = df['countryname'].map(project_country_abbrev_dict)
         df['boardapprovaldate'] = pd.to_datetime(df['boardapprovaldate'])
         df['closingdate'] = pd.to_datetime(df['closingdate'])
         df['year'] = df['boardapprovaldate'].dt.year
         df['year_close'] = df['closingdate'].dt.year
         df.fillna('', inplace=True)
         df = df[df.countrycode != '']
-        df['target'] = df.year_close.apply(lambda x: 1 if x != '' else 0)
+        df['target'] = (df.year_close != '').astype(int)
         df['year'] = df['year'].astype(str).str.slice(stop=4)
         df['year_close'] = df['year_close'].astype(str).str.slice(stop=4)
         
@@ -143,10 +145,14 @@ def transform(**kwargs):
         df['sector1'] = df['sector1'].replace('!.+', '', regex=True)
         df['sector1'] = df['sector1'].replace('^(\(Historic\))', '', regex=True)
         df = df[~df['countryname'].isin(non_countries)]
+
+        df["totalamt"] = df["totalamt"].str.replace(",","").astype(int)
+
         df = df[['id', 'countryname', 'sector1', 'countrycode', 'totalamt', 'year', 'year_close', 'target']]
         return df
     
     def transform_other(df: pd.DataFrame, non_countries: List[str], target_column: str)  -> pd.DataFrame:
+        logging.info(LOG_FORMAT + f'Transform {target_column} dataset')
         df.drop(columns=['Indicator Name', 'Indicator Code'], inplace=True)
         df.drop_duplicates(subset=['Country Name', 'Country Code'], inplace=True)
         df_melt = df.melt(
@@ -172,11 +178,26 @@ def transform(**kwargs):
     logging.info(LOG_FORMAT + 'Transform other')
     df_vvp = transform_other(data['df_vvp'], data['non_countries'], 'vvp')
     df_population  = transform_other(data['df_population'], data['non_countries'], 'population')
-    df_indicator = df_vvp.merge(
-        df_population,
-        on=('Country Name', 'Country Code', 'year'),
+    df_electricity = transform_other(data['df_electricity'], data['non_countries'], 'electricity')
+    df_rural  = transform_other(data['df_rural'], data['non_countries'], 'population_rural')
+    df_indicator = (
+        df_vvp
+        .merge(
+            df_population,
+            on=('Country Name', 'Country Code', 'year'),
+        )
+        .merge(
+            df_electricity,
+            on=('Country Name', 'Country Code', 'year'),
+        )
+        .merge(
+            df_rural,
+            on=('Country Name', 'Country Code', 'year'),
+        )
     )
-    df_indicator.columns = ['countryname', 'countrycode', 'year', 'vvp', 'population']
+    df_indicator = df_indicator.rename(columns={"Country Name": "countryname", "Country Code": "countrycode"})
+    df_indicator[['vvp', 'population', 'electricity', 'population_rural']] =\
+        df_indicator[['vvp', 'population', 'electricity', 'population_rural']].astype(float)
     logging.info(LOG_FORMAT + f'Number of clear data -- {df_indicator.countrycode.isna().sum()}')
     logging.info(LOG_FORMAT + f'Number of clear data -- {df_project.countrycode.isna().sum()}')
     logging.info(LOG_FORMAT + 'Merging data')
@@ -211,7 +232,7 @@ def load(**kwargs):
         table="alt_wb_statistic_dag",
         replace=True,
         target_fields=data.columns.tolist(),
-        replace_index=['id'],
+        replace_index=['project_id_alt'],
         rows=data.values.tolist()
     )
 
