@@ -1,4 +1,4 @@
- plugins for wb_data pipeline
+# plugins for wb_data pipeline
 from collections import defaultdict
 import json
 import logging
