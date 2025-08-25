@@ -89,6 +89,14 @@ def extract(**kwargs):
     with open('/opt/airflow/tmp/population_data_1960_1980.json', 'r') as f:
         df_population_first = pd.read_json(f)
     
+    # формируем шаблон для импорта всех данных из БД
+    sql_template = "select * from {}"
+
+    # извлекаем данные численности из трех разных источников
+    logging.info(LOG_FORMAT + 'Extract data')
+    with open('/opt/airflow/tmp/population_data_1960_1980.json', 'r') as f:
+        df_population_first = pd.read_json(f)
+    
     df_population_second  = pd.read_sql(
         sql_template.format('population_data'), conn_sqlite)
     df_population_third = pd.read_sql(
@@ -104,6 +112,14 @@ def extract(**kwargs):
         on=['Country Name', 'Country Code', 'Indicator Name', 'Indicator Code'],
         how='left'
     )
+
+    logging.info(LOG_FORMAT + 'Extract other data')
+    # достаем остальные данные из БД Posgres
+    df_rural = pd.read_sql(sql_template.format('s1w1_rural_population_percent'), conn_psql)
+    df_electricity = pd.read_sql(sql_template.format('s1w1_electricity_access_percent'), conn_psql)
+    df_project = pd.read_sql(sql_template.format('s1w1_projects_data'), conn_psql)
+    df_vvp = pd.read_sql(sql_template.format('s1w1_vvp_data'), conn_psql)
+    logging.info('Closing connections')
 
     conn_psql.close()
     conn_sqlite.close()
