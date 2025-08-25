@@ -105,7 +105,6 @@ def extract(**kwargs):
         how='left'
     )
 
-@@ -109,153 +115,165 @@ def extract(**kwargs):
     conn_psql.close()
     conn_sqlite.close()
     # данные по странам тоже импортируем, были подготовлены на этапе EDA
