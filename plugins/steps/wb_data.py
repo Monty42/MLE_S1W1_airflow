@@ -271,14 +271,12 @@ def transform(**kwargs):
     logging.info(LOG_FORMAT + f"Size of final data {df_project_meta.shape}")
     logging.info(LOG_FORMAT + "Push data from transform part to task_instance")
     ti.xcom_push("transformed_data", df_project_meta)
-    ti.xcom_push("transformed_data2", df_project_meta)
 
 def load(**kwargs):
     """Load transformed data into destination table."""
     logging.info(LOG_FORMAT + "Collect data from transform")
     ti = kwargs["ti"]
     data = ti.xcom_pull(task_ids="transform", key="transformed_data")
-    data2 = ti.xcom_pull(task_ids="transform", key="transformed_data2")
     logging.info(LOG_FORMAT + f"{data.columns.tolist()}")
     hook = PostgresHook("destination_db")
     hook.insert_rows(

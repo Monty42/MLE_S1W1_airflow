@@ -115,7 +115,6 @@ def transform(data: Dict) -> pd.DataFrame:
     Returns:
         pd.DataFrame: result data for load pfrt
     """
-    
     logging.info(LOG_FORMAT + 'Start the transform part')
     def transform_projects(
             df: pd.DataFrame, 
@@ -132,7 +131,6 @@ def transform(data: Dict) -> pd.DataFrame:
                 project_country_abbrev_dict[country] = countries.lookup(country).alpha_3
             except: 
                 continue
-        
         project_country_abbrev_dict.update(country_mapping)
         # добавляем столбец `countrycode` в датафрейм
         df['countrycode'] = df['countryname'].apply(lambda x: project_country_abbrev_dict[x])
@@ -181,7 +179,6 @@ def transform(data: Dict) -> pd.DataFrame:
         # переводим столбец индикатора к числовому типу
         df_melt[f'{target_column}'] = df_melt[f'{target_column}'].astype(float)
         return df_melt
-    
     
     logging.info(LOG_FORMAT + 'Collect data from extract')
     # получаем данне с шага extract
@@ -251,3 +248,4 @@ def prepare_wb_data() -> None:
 
 if __name__ == '__main__':
     prepare_wb_data()
+    

@@ -20,7 +20,5 @@ with DAG(
     step3 = PythonOperator(task_id='transform', python_callable=transform)
     step4 = PythonOperator(task_id='load', python_callable=load)
 
-    # [step1, step2] >> step3 >> step4
-    chain([step1, step2], step3, step4)
     # step1 >> step2 >> step3 >> step4
-    # step4 << step3 << step2 << step1
+    chain([step1, step2], step3, step4)
