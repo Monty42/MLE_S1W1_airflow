@@ -36,7 +36,6 @@ def _create_engine(source: str):
     username = os.environ.get(f'DB_{source}_USER')
     password = os.environ.get(f'DB_{source}_PASSWORD')
     db = os.environ.get(f'DB_{source}_NAME')
-    
     return create_engine(
         f'postgresql://{username}:{password}@{host}:{port}/{db}')
 
@@ -63,7 +62,6 @@ def extract() -> Dict:
     logging.info(LOG_FORMAT + 'Extract data')
     with open('data/preprocess_data/population_data_1960_1980.json', 'r') as f:
         df_population_first = pd.read_json(f)
-    
     df_population_second  = pd.read_sql(
         sql_template.format('population_data'), engine_sqlite)
     df_population_third = pd.read_sql(
@@ -179,7 +177,6 @@ def transform(data: Dict) -> pd.DataFrame:
         # переводим столбец индикатора к числовому типу
         df_melt[f'{target_column}'] = df_melt[f'{target_column}'].astype(float)
         return df_melt
-    
     logging.info(LOG_FORMAT + 'Collect data from extract')
     # получаем данне с шага extract
     logging.info(LOG_FORMAT + f'{type(data)}')
@@ -210,7 +207,6 @@ def transform(data: Dict) -> pd.DataFrame:
         columns={
             'countryname_x': 'countryname_off',
             'countryname_y': 'countryname',
-            'id': "project_id"
         },
         inplace=True,
     )
@@ -245,5 +241,7 @@ def prepare_wb_data() -> None:
     transformed_data = transform(data)
     load(transformed_data)
 
-prepare_wb_data()
+
+if __name__ == '__main__':
+    prepare_wb_data()
     
