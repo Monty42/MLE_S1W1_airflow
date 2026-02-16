@@ -245,7 +245,5 @@ def prepare_wb_data() -> None:
     transformed_data = transform(data)
     load(transformed_data)
 
-
-if __name__ == '__main__':
-    prepare_wb_data()
+prepare_wb_data()
     
